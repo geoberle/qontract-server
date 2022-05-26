@@ -15,10 +15,18 @@ export type Datafile = {
   [key: string]: any;
 };
 
+export type ResourcefileBackRef = {
+  path: string;
+  datafileSchema: string;
+  type: string;
+  jsonpath: string;
+}
+
 export type Resourcefile = {
   path: string;
   content: string;
-  shasum256: string;
+  sha256sum: string;
+  backrefs: ResourcefileBackRef[];
 };
 
 export type Bundle = {
@@ -103,7 +111,7 @@ const validateObject = (path: string, data: object, requiredFields: string[]) : 
 const parseResourcefiles = (jsonData: object) : im.Map<string, Resourcefile> => {
   return Object.entries(jsonData).reduce(
     (acc: im.Map<string, Resourcefile>, [path, data]: [string, Resourcefile]) => {
-      validateObject(path, data, ['path', 'content', 'sha256sum']);
+      validateObject(path, data, ['path', 'content', 'sha256sum', 'backrefs']);
       data.path = path;
       return acc.set(path, data);
     },

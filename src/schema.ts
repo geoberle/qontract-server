@@ -189,6 +189,10 @@ const createSchemaType = (app: express.Express, bundleSha: string, conf: any) =>
         throw `fieldInfo type is undefined: ${JSON.stringify(fieldInfo)}`;
       }
 
+      if (fieldInfo.isResourceRef) {
+        t = resourceRefType
+      }
+
       if (fieldInfo.isRequired) {
         t = new GraphQLNonNull(t);
       }
@@ -300,6 +304,13 @@ const createSchemaType = (app: express.Express, bundleSha: string, conf: any) =>
 const jsonType = new GraphQLScalarType({
   name: 'JSON',
   serialize: JSON.stringify,
+});
+
+const resourceRefType = new GraphQLScalarType({
+  name: 'ResourceRef',
+  serialize(value) {
+    return value;
+  }
 });
 
 export const generateAppSchema = (app: express.Express, bundleSha: string): GraphQLSchema => {
