@@ -98,6 +98,81 @@ const resolveSyntheticField = (app: express.Express,
     return resolutionContext.map((c: any) => c.$ref).includes(path);
   }).values());
 
+const extractFieldPath = (path: any) => {
+  let currentPathElement = path;
+  const pathlist = [currentPathElement.key];
+  while (currentPathElement.prev !== undefined) {
+    currentPathElement = currentPathElement.prev;
+    pathlist.unshift(currentPathElement.key);
+  }
+  return pathlist.toString();
+};
+
+const passesFilter = (obj: any, args: any) => {
+  // unpack filter arguments
+  let filterArgs = args;
+  if ('filter' in args) {
+    filterArgs = Object.assign(args, args.filter);
+    delete filterArgs.filter;
+  }
+
+  // the object we check is an array
+  // at least one element in the array must pass the filter
+  if (obj.constructor === Array) {
+    for (const element of obj) {
+      if (passesFilter(element, filterArgs)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  for (const key of Object.keys(filterArgs)) {
+    if (!(key in obj) || obj[key] == null) {
+      // the current object does not have the key as attribute
+      return false;
+    }
+
+    if (typeof obj[key] === 'object') {
+      // this is an object - we go one layer deeper
+      if (!passesFilter(obj[key], filterArgs[key])) {
+        return false;
+      }
+    } else if (filterArgs[key] !== obj[key]) {
+      // scalar values are not the same
+      return false;
+    }
+  }
+  return true;
+};
+
+const filterObject = (obj: any, context: any, args: any, info: any) => {
+  if (!passesFilter(obj, args)) {
+    // register filtering for later error handling
+    if ('filteredNonNullables' in context) {
+      context['filteredNonNullables'].push(extractFieldPath(info.path));
+    } else {
+      context['filteredNonNullables'] = [extractFieldPath(info.path)];
+    }
+    return null;
+  }
+  return obj;
+};
+
+const filter = (obj: any, context: any, args: any, info: any) => {
+  if (isNonEmptyArray(obj)) {
+    const filteredObjects: any[] = [];
+    for (const element of obj) {
+      const res = filterObject(element, context, args, info);
+      if (res != null) {
+        filteredObjects.push(res);
+      }
+    }
+    return filteredObjects;
+  }
+  return filterObject(obj, context, args, info);
+};
+
 // default resolver
 export const defaultResolver = (app: express.Express, bundleSha: string) =>
   (root: any, args: any, context: any, info: any) => {
@@ -125,7 +200,8 @@ export const defaultResolver = (app: express.Express, bundleSha: string) =>
 
       // if there are elements that aren't references return the array as is
       if (checkRefs.includes(false)) {
-        return val;
+        // todo: what about mixed content?
+        return filter(val, context, args, info);
       }
 
       // resolve all the elements of the array
@@ -138,12 +214,13 @@ export const defaultResolver = (app: express.Express, bundleSha: string) =>
       if (String(info.returnType)[0] === '[') {
         arrayResolve = arrayResolve.flat(1);
       }
-
-      return arrayResolve;
+      return filter(arrayResolve, context, args, info);
     }
 
-    if (isRef(val)) return db.resolveRef(app.get('bundles')[bundleSha], val);
-    return val;
+    if (isRef(val)) {
+      return filter(db.resolveRef(app.get('bundles')[bundleSha], val), context, args, info);
+    }
+    return filter(val, context, args, info);
   };
 
 // ------------------ START SCHEMA ------------------
@@ -213,7 +290,7 @@ const createSchemaType = (app: express.Express, bundleSha: string, conf: any) =>
         // schema
 
         // path is always a searchable field
-        fieldDef['args'] = { path: { type: GraphQLString } };
+        fieldDef['args'] = { path: { type: GraphQLString }, filter: { type: jsonType } };
 
         // add other searchable fields
         for (const searchableField of getSearchableFields(app, bundleSha, fieldInfo.type)) {
@@ -226,12 +303,7 @@ const createSchemaType = (app: express.Express, bundleSha: string, conf: any) =>
               if (df.$schema !== fieldInfo.datafileSchema) {
                 return false;
               }
-              for (const key of Object.keys(args)) {
-                if (!(key in df) || args[key] !== df[key]) {
-                  return false;
-                }
-              }
-              return true;
+              return passesFilter(df, args);
             }).values());
         };
       } else if (fieldInfo.synthetic) {
@@ -270,6 +342,14 @@ const createSchemaType = (app: express.Express, bundleSha: string, conf: any) =>
 
             return results;
           };
+        }
+      } else {
+        const sf = getSearchableFields(app, bundleSha, fieldInfo.type);
+        if (sf !== undefined) {
+          fieldDef['args'] = { filter: { type: jsonType } };
+          for (const searchableField of sf) {
+            fieldDef['args'][searchableField] = { type: GraphQLString };
+          }
         }
       }
 

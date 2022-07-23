@@ -49,7 +49,34 @@ const buildApolloServer = (app: express.Express, bundleSha: string): ApolloServe
         requestDidStart(requestContext) {
           return {
             willSendResponse(requestContext) {
-              requestContext.response.extensions = { schemas: requestContext.context.schemas };
+              // error filtering
+              let filteredPaths: any[] = [];
+              if ('context' in requestContext && 'filteredNonNullables' in requestContext.context) {
+                filteredPaths = requestContext.context.filteredNonNullables;
+              }
+              if (requestContext.response.errors) {
+                // remove all errors related to filtering
+                requestContext.response.errors = requestContext.response.errors.filter(
+                  (err: any) => !(
+                    err.message.startsWith('Cannot return null for non-nullable field') &&
+                    filteredPaths.includes(err.path.toString())
+                  ),
+                );
+                // if no errors are left, remove the error field
+                if (requestContext.response.errors.length === 0) {
+                  delete requestContext.response.errors;
+                }
+              }
+
+              for (const [key, value] of Object.entries(requestContext.response.data)) {
+                if (value.constructor === Array) {
+                  requestContext.response.data[key] = value.filter((x: any) => x != null);
+                }
+              }
+              requestContext.response.extensions = {
+                schemas: requestContext.context.schemas,
+                filteredResults: requestContext.context.filteredNonNullables !== undefined,
+              };
             },
           };
         },
