@@ -81,7 +81,8 @@ const resolveSyntheticField = (app: express.Express,
                                bundleSha: string,
                                path: string,
                                schema: string,
-                               subAttr: string): db.Datafile[] =>
+                               subAttr: string,
+                               args: any): db.Datafile[] =>
   Array.from(app.get('bundles')[bundleSha].datafiles.filter((datafile: any) => {
 
     if (datafile.$schema !== schema) { return false; }
@@ -95,7 +96,7 @@ const resolveSyntheticField = (app: express.Express,
         return null;
       }).flat().filter((c: any) => c);
     }
-    return resolutionContext.map((c: any) => c.$ref).includes(path);
+    return resolutionContext.map((c: any) => c.$ref).includes(path) && passesFilter(datafile, args);
   }).values());
 
 const extractFieldPath = (path: any) => {
@@ -308,13 +309,16 @@ const createSchemaType = (app: express.Express, bundleSha: string, conf: any) =>
         };
       } else if (fieldInfo.synthetic) {
         // synthetic
-        fieldDef['resolve'] = (root: any) => resolveSyntheticField(
-          app,
-          bundleSha,
-          root.path,
-          fieldInfo.synthetic.schema,
-          fieldInfo.synthetic.subAttr,
-        );
+        fieldDef['args'] = { filter: { type: jsonType } };
+        fieldDef['resolve'] = (root: any, args: any) =>
+          resolveSyntheticField(
+            app,
+            bundleSha,
+            root.path,
+            fieldInfo.synthetic.schema,
+            fieldInfo.synthetic.subAttr,
+            args,
+          );
       } else if (fieldInfo.isResource) {
         if (fieldInfo.type === 'string' && fieldInfo.resolveResource) {
           // a resource reference
