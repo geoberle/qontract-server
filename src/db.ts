@@ -9,6 +9,9 @@ import { logger } from './logger';
 // cannot use `import` (old package with no associated types)
 const jsonpointer = require('jsonpointer');
 
+// async json parsing
+const bfj = require('bfj');
+
 export type Datafile = {
   $schema: string;
   path: string;
@@ -74,17 +77,23 @@ export const resolveRef = (bundle: Bundle, itemRef: Referencing) : any => {
   return resolvedData;
 };
 
-const parseBundle = (contents: string) : Bundle => {
-  const parsedContents = JSON.parse(contents);
-
-  return {
-    datafiles: parseDatafiles(parsedContents.data),
-    resourcefiles: parseResourcefiles(parsedContents.resources),
-    fileHash: hashDatafile(contents),
-    gitCommit: parsedContents['git_commit'],
-    gitCommitTimestamp: parsedContents['git_commit_timestamp'],
-    schema: parsedContents.graphql,
-  } as Bundle;
+const parseBundle = (contents: string) : Promise<Bundle> => {
+  const { Readable } = require("stream")
+  const readable = Readable.from([contents])
+  logger.info("start parsing")
+  const res = bfj.parse(readable);
+  logger.info("done parsing - wait for promise");
+  return res.then(function(parsedContents) {
+    logger.info("result from promise %s", parsedContents);
+    return {
+      datafiles: parseDatafiles(parsedContents.data),
+      resourcefiles: parseResourcefiles(parsedContents.resources),
+      fileHash: hashDatafile(contents),
+      gitCommit: parsedContents['git_commit'],
+      gitCommitTimestamp: parsedContents['git_commit_timestamp'],
+      schema: parsedContents.graphql,
+    } as Bundle;
+  });
 };
 
 const parseDatafiles = (jsonData: object) : im.Map<string, Datafile> => {
